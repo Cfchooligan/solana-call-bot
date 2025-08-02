@@ -1,4 +1,4 @@
-python-telegram-bot==20.6
+python-telegram-bot[job-queue]
 requests
-pyTelegramBotAPI==4.14.1
+
 
