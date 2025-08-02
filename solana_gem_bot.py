@@ -94,6 +94,5 @@ def main_loop():
 
 
 if __name__ == '__main__':
-    print("Manual trigger starting...")
     post_calls()
 
