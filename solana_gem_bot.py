@@ -2,13 +2,13 @@ import requests
 import time
 import random
 import telebot
-from datetime import datetime
+from datetime import datetime, timezone
 
 # === CONFIGURATION ===
-TELEGRAM_TOKEN = '7743771588:AAEOvqFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ'
+TELEGRAM_TOKEN = '7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ'
 CHAT_ID = '-1002866839481'  # Your private channel ID
 MAX_POSTS_PER_DAY = 3
-POST_HOURS = [10, 15, 20]  # Nigeria time (AM, Afternoon, Evening)
+POST_HOURS = [10, 15, 20]  # Nigeria time
 TIMEZONE_OFFSET = 1  # Nigeria is UTC+1
 
 # === INITIALIZE TELEGRAM BOT ===
@@ -26,7 +26,7 @@ def fetch_solana_pairs():
     try:
         response = requests.get(url)
         response.raise_for_status()
-        print("Raw response text:", response.text)  # Debug: log raw API response
+        print("Raw response text:", response.text[:500])  # for debugging
         data = response.json()
         all_pairs = data.get('pairs', [])
         solana_pairs = [pair for pair in all_pairs if pair.get('chainId') == 'solana']
@@ -72,6 +72,9 @@ def format_message(pair):
 def post_calls():
     print("Fetching pairs...")
     pairs = fetch_solana_pairs()
+    if not pairs:
+        print("No pairs fetched or parsed.")
+        return
     good_ones = [p for p in pairs if is_valid_token(p)]
     random.shuffle(good_ones)
     posted = 0
@@ -82,7 +85,7 @@ def post_calls():
             msg = format_message(pair)
             bot.send_message(CHAT_ID, msg, parse_mode="Markdown", disable_web_page_preview=False)
             posted += 1
-            time.sleep(10)  # avoid spamming
+            time.sleep(10)
         except Exception as e:
             print("Error posting:", e)
 
@@ -90,7 +93,7 @@ def post_calls():
 def main_loop():
     posted_today = []
     while True:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         hour_local = (now.hour + TIMEZONE_OFFSET) % 24
         if hour_local in POST_HOURS and hour_local not in posted_today:
             post_calls()
@@ -98,7 +101,7 @@ def main_loop():
             print(f"Posted for hour {hour_local}")
         elif hour_local == 0:
             posted_today = []  # reset daily tracker
-        time.sleep(60)  # check every minute
+        time.sleep(60)
 
 
 if __name__ == '__main__':
