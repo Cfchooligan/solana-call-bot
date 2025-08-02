@@ -1,89 +1,98 @@
-import requests
 import logging
-import datetime
-from telegram import Bot
-from telegram.ext import Application, CallbackContext
-from telegram.ext import JobQueue
 import asyncio
-import os
+import requests
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    JobQueue,
+)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "your_token_here")
-CHANNEL_ID = os.getenv("CHANNEL_ID", "your_channel_id_here")
+# Replace with your actual bot token and channel ID
+BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+CHANNEL_ID = '@yourchannelname'  # Include '@' before your channel username
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
-print("🚀 Bot script is executing...")
 
+
+# Function to fetch Solana token pairs from dexscreener
 def fetch_solana_pairs():
-    url = 'https://api.dexscreener.com/latest/dex/pairs/solana'
+    url = 'https://api.dexscreener.com/latest/dex/pairs'
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        return data.get('pairs', [])
+        solana_pairs = [
+            pair for pair in data.get('pairs', [])
+            if pair.get('chainId') == 'solana'
+        ]
+        return solana_pairs
     except Exception as e:
         logger.error(f"Failed to fetch or parse data: {e}")
         return []
 
-def filter_gems(pairs):
+
+# Function to identify potential "gems" from token pairs
+def find_gems(pairs):
     gems = []
     for pair in pairs:
         try:
-            if not pair.get('baseToken') or not pair.get('priceUsd'):
-                continue
-            base_token = pair['baseToken']
-            if not base_token.get('name') or not base_token.get('symbol'):
-                continue
-            price_usd = float(pair['priceUsd'])
-            if not (0.000001 <= price_usd <= 0.005):
-                continue
-            if (pair.get('txns', {}).get('m5', {}).get('buys', 0) < 10 or 
-                pair.get('txns', {}).get('h1', {}).get('buys', 0) < 10):
-                continue
-            if pair.get('fdv') is None or pair.get('liquidity', {}).get('usd', 0) < 1000:
-                continue
-            if (pair.get('fdv') > 5_000_000 or 
-                pair.get('liquidity', {}).get('usd', 0) > 50_000):
-                continue
-            if not pair.get('pairCreatedAt'):
-                continue
-            pair_created_at = datetime.datetime.fromtimestamp(pair['pairCreatedAt'] / 1000)
-            now = datetime.datetime.now(datetime.timezone.utc)
-            age_minutes = (now - pair_created_at.replace(tzinfo=datetime.timezone.utc)).total_seconds() / 60
-            if age_minutes > 180:
-                continue
-            gems.append(pair)
+            price_change = float(pair.get("priceChange", {}).get("h1", 0))
+            volume_usd = float(pair.get("volume", {}).get("h1", 0))
+            liquidity_usd = float(pair.get("liquidity", {}).get("usd", 0))
+
+            if price_change > 10 and volume_usd > 500 and liquidity_usd > 1000:
+                gems.append(pair)
         except Exception as e:
-            logger.warning(f"Error processing pair: {e}")
-            continue
+            logger.warning(f"Skipping pair due to error: {e}")
     return gems
 
+
+# Function to format a message from a gem pair
 def format_gem_message(pair):
-    base = pair['baseToken']
-    info = f"""
-🚀 *New Solana Gem Spotted!*
+    try:
+        base = pair.get("baseToken", {})
+        name = base.get("name", "Unknown")
+        symbol = base.get("symbol", "N/A")
+        address = base.get("address", "N/A")
+        price = pair.get("priceUsd", "N/A")
+        price_change = pair.get("priceChange", {}).get("h1", "N/A")
+        volume = pair.get("volume", {}).get("h1", "N/A")
+        liquidity = pair.get("liquidity", {}).get("usd", "N/A")
+        url = pair.get("url", "#")
 
-🔹 *Token*: [{base['name']}]({pair['url']}) (${base['symbol']})
-💰 *Price*: ${pair['priceUsd']}
-📈 *FDV*: ${int(pair.get('fdv', 0)):,}
-💦 *Liquidity*: ${int(pair.get('liquidity', {}).get('usd', 0)):,}
-🕒 *Created*: <code>{datetime.datetime.fromtimestamp(pair['pairCreatedAt'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}</code>
-🔗 [View on Dexscreener]({pair['url']})
+        return (
+            f"🔥 *Solana Gem Spotted!*\n\n"
+            f"*Name:* {name}\n"
+            f"*Symbol:* {symbol}\n"
+            f"*Price:* ${price}\n"
+            f"*1h Change:* {price_change}%\n"
+            f"*1h Volume:* ${volume}\n"
+            f"*Liquidity:* ${liquidity}\n"
+            f"[View on Dexscreener]({url})\n"
+            f"`Token Address:` `{address}`"
+        )
+    except Exception as e:
+        logger.error(f"Error formatting message: {e}")
+        return "Error formatting token data."
 
-#Solana #MemeCoin #ZeroToHero
-"""
-    return info
 
-async def post_gems(context: CallbackContext):
+# Job function to post gems to channel
+async def post_gems(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Checking for Solana gems...")
     pairs = fetch_solana_pairs()
-    gems = filter_gems(pairs)
+    gems = find_gems(pairs)
 
     if not gems:
         logger.info("No gems found.")
         return
 
-    for gem in gems[:3]:
+    for gem in gems[:3]:  # Limit to top 3 gems per hour
         message = format_gem_message(gem)
         try:
             await context.bot.send_message(
@@ -92,27 +101,36 @@ async def post_gems(context: CallbackContext):
                 parse_mode='Markdown',
                 disable_web_page_preview=False
             )
-            logger.info(f"Posted gem: {gem['baseToken']['symbol']}")
         except Exception as e:
-            logger.error(f"Failed to post to Telegram: {e}")
+            logger.error(f"Failed to send message: {e}")
 
+
+# Start command handler
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 I'm alive and watching the Solana chain for gems!")
+
+
+# Main function to start bot and job scheduler
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Run once at startup
-    await post_gems(CallbackContext.from_update(None, app))
+    app.add_handler(CommandHandler("start", start_command))
 
-    # Schedule repeating job
-    job_queue: JobQueue = app.job_queue
-    job_queue.run_repeating(post_gems, interval=3600, first=3600)
+    job_queue = app.job_queue
+    job_queue.run_repeating(post_gems, interval=3600, first=10)  # every hour
 
+    logger.info("✅ Bot is starting polling...")
+    await app.run_polling()
+
+
+# Run it safely depending on environment
+if __name__ == '__main__':
     try:
-        print("✅ Bot is starting polling...")
-        await app.run_polling()
-    except Exception as e:
-        print(f"❌ Error in run_polling: {e}")
-        logger.error(f"Exception in run_polling: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        asyncio.run(main())
+    except RuntimeError as e:
+        if "Cannot close a running event loop" in str(e):
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(main())
+        else:
+            raise
 
