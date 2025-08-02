@@ -1,13 +1,16 @@
+import os
 import logging
 import requests
 import asyncio
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, JobQueue
+from telegram import Bot
+from telegram.ext import Application, ContextTypes, CommandHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import os
+from apscheduler.triggers.cron import CronTrigger
 
-TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-CHANNEL_ID = os.getenv("CHANNEL_ID", "@your_channel_id")
+# ====== HARD-CODE YOUR CREDENTIALS HERE ======
+BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
+CHANNEL_ID = "-1002866839481"  # Must be a string!
+# =============================================
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -15,79 +18,83 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def fetch_solana_pairs():
-    url = 'https://api.dexscreener.com/latest/dex/pairs'
+def fetch_solana_gems():
+    url = "https://api.dexscreener.com/latest/dex/pairs/solana"
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        all_pairs = data.get('pairs', [])
-        solana_pairs = [pair for pair in all_pairs if pair.get('chainId') == 'solana']
-        return solana_pairs
+        gems = []
+
+        for pair in data.get("pairs", []):
+            base_token = pair["baseToken"]
+            price_usd = pair.get("priceUsd")
+            fdv = pair.get("fdv")
+            tx_count = pair.get("txCount", {}).get("h1", 0)
+            price_change = float(pair.get("priceChange", {}).get("h1", 0))
+
+            if (
+                base_token["symbol"] != "SOL"
+                and price_usd and float(price_usd) < 0.01
+                and fdv and fdv < 500000
+                and tx_count and tx_count > 100
+                and price_change > 0
+            ):
+                gems.append({
+                    "name": base_token["name"],
+                    "symbol": base_token["symbol"],
+                    "price": price_usd,
+                    "tx_count": tx_count,
+                    "price_change": price_change,
+                    "fdv": fdv,
+                    "url": pair["url"]
+                })
+
+        return gems
     except Exception as e:
         logger.error(f"Failed to fetch or parse data: {e}")
         return []
 
-def filter_solana_gems(pairs):
-    gems = []
-    for pair in pairs:
-        if (
-            pair.get("fdv", 0) < 1_000_000 and
-            pair.get("liquidity", {}).get("usd", 0) > 30_000 and
-            pair.get("txns", {}).get("h1", {}).get("buys", 0) > 50 and
-            pair.get("txns", {}).get("h1", {}).get("sells", 0) < 10
-        ):
-            gems.append(pair)
-    return gems
-
-async def post_to_channel(context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Checking for Solana gems...")
-    solana_pairs = fetch_solana_pairs()
-    gems = filter_solana_gems(solana_pairs)
-
-    if gems:
-        for gem in gems:
-            msg = f"🔥 *New Solana Gem Alert!*\n\n" \
-                  f"*Pair:* {gem.get('baseToken', {}).get('symbol')} / {gem.get('quoteToken', {}).get('symbol')}\n" \
-                  f"*FDV:* ${gem.get('fdv', 0):,.0f}\n" \
-                  f"*Liquidity:* ${gem.get('liquidity', {}).get('usd', 0):,.0f}\n" \
-                  f"*H1 Buys:* {gem.get('txns', {}).get('h1', {}).get('buys', 0)}\n" \
-                  f"*H1 Sells:* {gem.get('txns', {}).get('h1', {}).get('sells', 0)}\n" \
-                  f"[View Pair]({gem.get('url')})"
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
-    else:
+async def send_gem_alerts(context: ContextTypes.DEFAULT_TYPE):
+    gems = fetch_solana_gems()
+    if not gems:
         logger.info("No gems found.")
+        return
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Welcome! This bot automatically posts filtered Solana gems 3 times daily.")
+    for gem in gems:
+        message = (
+            f"🚨 New Solana Gem Alert 🚨\n\n"
+            f"Name: {gem['name']}\n"
+            f"Symbol: {gem['symbol']}\n"
+            f"Price: ${gem['price']}\n"
+            f"FDV: ${gem['fdv']:,.0f}\n"
+            f"Tx Count (1h): {gem['tx_count']}\n"
+            f"Price Change (1h): {gem['price_change']}%\n\n"
+            f"📊 Chart: {gem['url']}"
+        )
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=message)
+
+async def start(update, context):
+    await update.message.reply_text("Solana Gems Bot is active!")
 
 async def main():
     logger.info("🚀 Bot script is executing...")
 
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
 
-    # Schedule the gem posting job 3 times a day
-    job_queue: JobQueue = app.job_queue
+    # Schedule the job
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: job_queue.run_once(post_to_channel, 0), "cron", hour="7,14,22")
+    scheduler.add_job(lambda: application.create_task(send_gem_alerts(ContextTypes.DEFAULT_TYPE(bot=application.bot))), CronTrigger(hour="*/6"))
     scheduler.start()
 
     logger.info("✅ Bot is starting polling...")
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    await app.updater.idle()
+    await application.run_polling()
 
 if __name__ == "__main__":
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    try:
-        loop.run_until_complete(main())
-    except Exception as e:
+        asyncio.run(main())
+    except RuntimeError as e:
         logger.error(f"Exception in run_polling: {e}")
+
 
