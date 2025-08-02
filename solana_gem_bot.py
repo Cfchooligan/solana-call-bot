@@ -1,26 +1,24 @@
 import requests
-import time
-import random
-import telebot
-from datetime import datetime, timezone
+import logging
+import datetime
+from telegram import Bot
+from telegram.ext import Application, CallbackContext
+from telegram.ext import JobQueue
+import asyncio
+import os
 
-# === CONFIGURATION ===
-TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
-CHAT_ID = 'YOUR_CHANNEL_CHAT_ID'
-MAX_POSTS_PER_DAY = 3
-POST_HOURS = [10, 15, 20]  # Nigeria local hours to post
-TIMEZONE_OFFSET = 1  # Nigeria is UTC+1
+# Telegram bot token and channel ID
+BOT_TOKEN = os.getenv("BOT_TOKEN", "your_bot_token_here")
+CHANNEL_ID = os.getenv("CHANNEL_ID", "your_channel_id_here")  # example: -1001234567890
 
-# === TELEGRAM BOT INIT ===
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+# Set up logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# === FILTERING RULES ===
-MIN_LIQUIDITY = 5000
-MAX_MARKET_CAP = 50000
-MIN_VOLUME = 1000
-BLACKLIST_KEYWORDS = ['rug', 'kill', 'rekt', 'dead', 'scam', 'honeypot']
+# Print startup marker
+print("🚀 Bot script is executing...")
 
-
+# Fetch Solana pairs
 def fetch_solana_pairs():
     url = 'https://api.dexscreener.com/latest/dex/pairs'
     try:
@@ -31,76 +29,114 @@ def fetch_solana_pairs():
         solana_pairs = [pair for pair in all_pairs if pair.get('chainId') == 'solana']
         return solana_pairs
     except Exception as e:
-        print(f"Failed to fetch or parse data: {e}")
+        logger.error(f"Failed to fetch or parse data: {e}")
         return []
 
-
-def is_valid_token(pair):
-    name = (pair.get('baseToken', {}).get('name', '') + pair.get('baseToken', {}).get('symbol', '')).lower()
-    if any(bad in name for bad in BLACKLIST_KEYWORDS):
-        return False
-    try:
-        liquidity = float(pair.get('liquidity', {}).get('usd', 0))
-        market_cap = float(pair.get('fdv', 0))
-        volume = float(pair.get('volume', {}).get('h5', 0))
-        return liquidity >= MIN_LIQUIDITY and market_cap <= MAX_MARKET_CAP and volume >= MIN_VOLUME
-    except:
-        return False
-
-
-def format_message(pair):
-    name = pair['baseToken']['name']
-    symbol = pair['baseToken']['symbol']
-    mcap = round(float(pair['fdv']))
-    liq = round(float(pair['liquidity']['usd']))
-    vol = round(float(pair['volume']['h5']))
-    chart = pair.get('url', '')
-
-    msg = f"""🚀 *New Solana Meme Coin*
-
-🔹 *Name:* ${symbol} ({name})
-💰 *Market Cap:* ${mcap:,}
-📊 *5m Volume:* ${vol:,}
-🧊 *Liquidity:* ${liq:,}
-
-📈 [View Chart]({chart})
-#Solana #Gems #MemeCoin #ZeroToHero
-"""
-    return msg
-
-
-def post_calls():
-    print("Fetching pairs...")
-    pairs = fetch_solana_pairs()
-    good_ones = [p for p in pairs if is_valid_token(p)]
-    random.shuffle(good_ones)
-    posted = 0
-    for pair in good_ones:
-        if posted >= MAX_POSTS_PER_DAY:
-            break
+# Filter gems based on rules
+def filter_gems(pairs):
+    gems = []
+    for pair in pairs:
         try:
-            msg = format_message(pair)
-            bot.send_message(CHAT_ID, msg, parse_mode="Markdown", disable_web_page_preview=False)
-            posted += 1
-            time.sleep(10)
+            if not pair.get('baseToken') or not pair.get('priceUsd'):
+                continue
+
+            base_token = pair['baseToken']
+            if not base_token.get('name') or not base_token.get('symbol'):
+                continue
+
+            price_usd = float(pair['priceUsd'])
+            if not (0.000001 <= price_usd <= 0.005):
+                continue
+
+            if (pair.get('txns', {}).get('m5', {}).get('buys', 0) < 10 or 
+                pair.get('txns', {}).get('h1', {}).get('buys', 0) < 10):
+                continue
+
+            if pair.get('fdv') is None or pair.get('liquidity', {}).get('usd', 0) < 1000:
+                continue
+
+            if (pair.get('fdv') > 5_000_000 or 
+                pair.get('liquidity', {}).get('usd', 0) > 50_000):
+                continue
+
+            if not pair.get('pairCreatedAt'):
+                continue
+
+            pair_created_at = datetime.datetime.fromtimestamp(pair['pairCreatedAt'] / 1000)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            age_minutes = (now - pair_created_at.replace(tzinfo=datetime.timezone.utc)).total_seconds() / 60
+
+            if age_minutes > 180:  # 3 hours
+                continue
+
+            gems.append(pair)
+
         except Exception as e:
-            print("Error posting:", e)
+            logger.warning(f"Error processing pair: {e}")
+            continue
+    return gems
 
+# Format gem message
+def format_gem_message(pair):
+    base = pair['baseToken']
+    quote = pair['quoteToken']
+    info = f"""
+🚀 *New Solana Gem Spotted!*
 
-def main_loop():
-    posted_today = []
-    while True:
-        now = datetime.now(timezone.utc)
-        hour_local = (now.hour + TIMEZONE_OFFSET) % 24
-        if hour_local in POST_HOURS and hour_local not in posted_today:
-            post_calls()
-            posted_today.append(hour_local)
-            print(f"Posted for hour {hour_local}")
-        elif hour_local == 0:
-            posted_today = []
-        time.sleep(60)
+🔹 *Token*: [{base['name']}]({pair['url']}) (${base['symbol']})
+💰 *Price*: ${pair['priceUsd']}
+📈 *FDV*: ${int(pair.get('fdv', 0)):,}
+💦 *Liquidity*: ${int(pair.get('liquidity', {}).get('usd', 0)):,}
+🕒 *Created*: <code>{datetime.datetime.fromtimestamp(pair['pairCreatedAt'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}</code>
+🔗 [View on Dexscreener]({pair['url']})
 
+#Solana #MemeCoin #ZeroToHero
+"""
+    return info
 
-if __name__ == '__main__':
-    main_loop()
+# Main function to find and post gems
+async def post_gems(context: CallbackContext):
+    logger.info("Checking for Solana gems...")
+    pairs = fetch_solana_pairs()
+    gems = filter_gems(pairs)
+
+    if not gems:
+        logger.info("No gems found.")
+        return
+
+    for gem in gems[:3]:  # Post only top 3
+        message = format_gem_message(gem)
+        try:
+            await context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=message,
+                parse_mode='Markdown',
+                disable_web_page_preview=False
+            )
+            logger.info(f"Posted gem: {gem['baseToken']['symbol']}")
+        except Exception as e:
+            logger.error(f"Failed to post to Telegram: {e}")
+
+# Schedule the job
+async def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    # Post on startup
+    await post_gems(CallbackContext.from_update(None, app))
+
+    # Schedule repeating job
+    job_queue: JobQueue = app.job_queue
+    job_queue.run_repeating(post_gems, interval=3600, first=3600)  # every 1 hour
+
+    try:
+        print("✅ Bot is starting polling...")
+        await app.run_polling()
+    except Exception as e:
+        print(f"❌ An error occurred while starting the bot: {e}")
+        logger.error(f"Exception in run_polling: {e}")
+
+# Start bot
+if __name__ == "__main__":
+    asyncio.run(main())
+
 
