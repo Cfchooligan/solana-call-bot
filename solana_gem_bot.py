@@ -5,7 +5,7 @@ import telebot
 from datetime import datetime
 
 # === CONFIGURATION ===
-TELEGRAM_TOKEN = '7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ'
+TELEGRAM_TOKEN = '7743771588:AAEOvqFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ'
 CHAT_ID = '-1002866839481'  # Your private channel ID
 MAX_POSTS_PER_DAY = 3
 POST_HOURS = [10, 15, 20]  # Nigeria time (AM, Afternoon, Evening)
@@ -26,6 +26,7 @@ def fetch_solana_pairs():
     try:
         response = requests.get(url)
         response.raise_for_status()
+        print("Raw response text:", response.text)  # Debug: log raw API response
         data = response.json()
         all_pairs = data.get('pairs', [])
         solana_pairs = [pair for pair in all_pairs if pair.get('chainId') == 'solana']
@@ -33,8 +34,6 @@ def fetch_solana_pairs():
     except Exception as e:
         print(f"Failed to fetch or parse data: {e}")
         return []
-
-
 
 
 def is_valid_token(pair):
@@ -103,5 +102,4 @@ def main_loop():
 
 
 if __name__ == '__main__':
-    post_calls()
-
+    main_loop()
