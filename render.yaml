@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: solana-call-bot
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: ""
+    startCommand: python solana_gem_bot.py
