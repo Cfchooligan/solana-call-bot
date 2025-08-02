@@ -5,16 +5,16 @@ import telebot
 from datetime import datetime, timezone
 
 # === CONFIGURATION ===
-TELEGRAM_TOKEN = '7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ'
-CHAT_ID = '-1002866839481'  # Your private channel ID
+TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+CHAT_ID = 'YOUR_CHANNEL_CHAT_ID'
 MAX_POSTS_PER_DAY = 3
-POST_HOURS = [10, 15, 20]  # Nigeria time
+POST_HOURS = [10, 15, 20]  # Nigeria local hours to post
 TIMEZONE_OFFSET = 1  # Nigeria is UTC+1
 
-# === INITIALIZE TELEGRAM BOT ===
+# === TELEGRAM BOT INIT ===
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# === FILTER SETTINGS ===
+# === FILTERING RULES ===
 MIN_LIQUIDITY = 5000
 MAX_MARKET_CAP = 50000
 MIN_VOLUME = 1000
@@ -26,7 +26,6 @@ def fetch_solana_pairs():
     try:
         response = requests.get(url)
         response.raise_for_status()
-        print("Raw response text:", response.text[:500])  # for debugging
         data = response.json()
         all_pairs = data.get('pairs', [])
         solana_pairs = [pair for pair in all_pairs if pair.get('chainId') == 'solana']
@@ -38,7 +37,7 @@ def fetch_solana_pairs():
 
 def is_valid_token(pair):
     name = (pair.get('baseToken', {}).get('name', '') + pair.get('baseToken', {}).get('symbol', '')).lower()
-    if any(bad_word in name for bad_word in BLACKLIST_KEYWORDS):
+    if any(bad in name for bad in BLACKLIST_KEYWORDS):
         return False
     try:
         liquidity = float(pair.get('liquidity', {}).get('usd', 0))
@@ -56,6 +55,7 @@ def format_message(pair):
     liq = round(float(pair['liquidity']['usd']))
     vol = round(float(pair['volume']['h5']))
     chart = pair.get('url', '')
+
     msg = f"""🚀 *New Solana Meme Coin*
 
 🔹 *Name:* ${symbol} ({name})
@@ -72,9 +72,6 @@ def format_message(pair):
 def post_calls():
     print("Fetching pairs...")
     pairs = fetch_solana_pairs()
-    if not pairs:
-        print("No pairs fetched or parsed.")
-        return
     good_ones = [p for p in pairs if is_valid_token(p)]
     random.shuffle(good_ones)
     posted = 0
@@ -100,9 +97,10 @@ def main_loop():
             posted_today.append(hour_local)
             print(f"Posted for hour {hour_local}")
         elif hour_local == 0:
-            posted_today = []  # reset daily tracker
+            posted_today = []
         time.sleep(60)
 
 
 if __name__ == '__main__':
     main_loop()
+
