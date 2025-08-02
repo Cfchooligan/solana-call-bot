@@ -22,15 +22,18 @@ BLACKLIST_KEYWORDS = ['rug', 'kill', 'rekt', 'dead', 'scam', 'honeypot']
 
 
 def fetch_solana_pairs():
-    url = 'https://api.dexscreener.com/latest/dex/pairs/solana'
+    url = 'https://api.dexscreener.com/latest/dex/pairs'
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()  # Raise if status is 4xx or 5xx
+        response = requests.get(url)
+        response.raise_for_status()
         data = response.json()
-        return data.get('pairs', [])
+        all_pairs = data.get('pairs', [])
+        solana_pairs = [pair for pair in all_pairs if pair.get('chainId') == 'solana']
+        return solana_pairs
     except Exception as e:
-        print("Failed to fetch or parse data:", e)
+        print(f"Failed to fetch or parse data: {e}")
         return []
+
 
 
 
