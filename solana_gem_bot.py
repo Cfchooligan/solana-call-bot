@@ -4,20 +4,18 @@ import asyncio
 from telegram import Bot
 from telegram.ext import Application
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime
 
-# Set up logging
+# Logging setup
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Replace with your own Telegram bot token and channel ID
+# Telegram Bot Setup
 TELEGRAM_BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
 TELEGRAM_CHANNEL_ID = "-1002866839481"
 
-# Fetch top 1 Solana pair from DexScreener
 def fetch_solana_gem():
     url = "https://api.dexscreener.com/latest/dex/pairs/solana"
     try:
@@ -56,7 +54,6 @@ def fetch_solana_gem():
         logger.error(f"Failed to fetch or parse data: {e}")
         return None
 
-# Send the gem info to Telegram
 async def send_solana_gem(context=None):
     gem_info = fetch_solana_gem()
     if gem_info:
@@ -66,7 +63,6 @@ async def send_solana_gem(context=None):
     else:
         logger.info("No Solana gem found.")
 
-# Main bot logic
 async def main():
     logger.info("🚀 Bot script is executing...")
 
@@ -79,12 +75,12 @@ async def main():
     logger.info("✅ Bot is starting polling...")
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
-    await app.updater.idle()
+    await app.run_polling()  # ✅ Replaces updater.start_polling and idle()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except Exception as e:
         logger.error(f"❌ Exception in run_polling: {e}")
+
 
