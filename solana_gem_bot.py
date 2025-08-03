@@ -2,82 +2,89 @@ import logging
 import requests
 import asyncio
 from telegram import Bot
-from telegram.ext import ApplicationBuilder, ContextTypes
+from telegram.ext import Application
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import os
+from datetime import datetime
 
-# =======================
-# ✅ SET YOUR VARIABLES
-# =======================
-BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"  # Replace with your actual bot token
-CHANNEL_ID = -1002866839481   # Your Telegram channel ID
-
-DEXSCREENER_URL = "https://api.dexscreener.com/latest/dex/pairs/solana"
-
-# =======================
-# 📜 SETUP LOGGING
-# =======================
+# Set up logging
 logging.basicConfig(
-    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# =======================
-# 📥 FETCH & FORMAT GEMS
-# =======================
-def fetch_solana_gems():
+# Replace with your own Telegram bot token and channel ID
+TELEGRAM_BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
+TELEGRAM_CHANNEL_ID = "-1002866839481"
+
+# Fetch top 1 Solana pair from DexScreener
+def fetch_solana_gem():
+    url = "https://api.dexscreener.com/latest/dex/pairs/solana"
     try:
-        response = requests.get(DEXSCREENER_URL, timeout=10)
+        response = requests.get(url)
         response.raise_for_status()
         data = response.json()
 
-        gems = []
-        for pair in data.get("pairs", []):
-            if not pair.get("baseToken") or not pair.get("liquidity", {}).get("usd"):
-                continue
+        if not data["pairs"]:
+            return None
 
-            base = pair["baseToken"]
-            metrics = {
-                "name": base.get("name", "N/A"),
-                "symbol": base.get("symbol", "N/A"),
-                "price": pair.get("priceUsd", "N/A"),
-                "liquidity": pair["liquidity"].get("usd", 0),
-                "volume_5m": pair["volume"].get("m5", 0),
-                "buyers": pair.get("txns", {}).get("m5", {}).get("buys", 0),
-                "sellers": pair.get("txns", {}).get("m5", {}).get("sells", 0),
-                "url": pair.get("url", "N/A"),
-                "address": base.get("address", "N/A"),
-            }
+        top_pair = data["pairs"][0]
+        name = top_pair.get("baseToken", {}).get("name", "Unknown")
+        symbol = top_pair.get("baseToken", {}).get("symbol", "N/A")
+        price = top_pair.get("priceUsd", "N/A")
+        liquidity = top_pair.get("liquidity", {}).get("usd", "N/A")
+        volume_5m = top_pair.get("volume", {}).get("m5", "N/A")
+        buyers = top_pair.get("txns", {}).get("m5", {}).get("buys", 0)
+        sellers = top_pair.get("txns", {}).get("m5", {}).get("sells", 0)
+        pair_url = top_pair.get("url", "")
+        contract = top_pair.get("pairAddress", "N/A")
 
-            if metrics["volume_5m"] >= 1000 and metrics["buyers"] > metrics["sellers"]:
-                gems.append(metrics)
+        message = f"""
+🔥 <b>New Solana Gem Detected</b>
 
-        return gems
+<b>Name:</b> {name}
+<b>Symbol:</b> {symbol}
+<b>Price:</b> ${float(price):.6f}
+<b>Liquidity:</b> ${float(liquidity):,.0f}
+<b>5m Volume:</b> ${float(volume_5m):,.0f}
+<b>Buyers:</b> {buyers} | <b>Sellers:</b> {sellers}
+<b>Contract:</b> <code>{contract}</code>
+🔗 <a href="{pair_url}">DexScreener Link</a>
+"""
+        return message.strip()
     except Exception as e:
         logger.error(f"Failed to fetch or parse data: {e}")
-        return []
+        return None
 
-# =======================
-# 📤 SEND TO TELEGRAM
-# =======================
-async def post_solana_gems(context: ContextTypes.DEFAULT_TYPE):
-    gems = fetch_solana_gems()
+# Send the gem info to Telegram
+async def send_solana_gem(context=None):
+    gem_info = fetch_solana_gem()
+    if gem_info:
+        bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        await bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=gem_info, parse_mode="HTML", disable_web_page_preview=False)
+        logger.info("✅ Message sent to Telegram")
+    else:
+        logger.info("No Solana gem found.")
 
-    if not gems:
-        logger.info("No gems found.")
-        return
+# Main bot logic
+async def main():
+    logger.info("🚀 Bot script is executing...")
 
-    for gem in gems[:3]:  # Limit to 3 posts
-        message = (
-            f"🚀 *New Solana Meme Gem!*\n\n"
-            f"*Name:* {gem['name']} ({gem['symbol']})\n"
-            f"*Price:* ${float(gem['price']):.6f}\n"
-            f"*Liquidity:* ${float(gem['liquidity']):,.0f}\n"
-            f"*5m Volume:* ${float(gem['volume_5m']):,.0f}\n"
-            f"*Buyers:* {gem['buyers']} / *Sellers:* {gem['sellers']}\n"
-            f"*Contract:* `{gem['address']}`\n"
-            f"[View on DexScreener]({gem['url']})"
-        )
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-        tr
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(lambda: asyncio.create_task(send_solana_gem()), "cron", hour="10,15,20")
+    scheduler.start()
+
+    logger.info("✅ Bot is starting polling...")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.idle()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.error(f"❌ Exception in run_polling: {e}")
+
