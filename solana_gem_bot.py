@@ -95,15 +95,21 @@ if __name__ == "__main__":
     import asyncio
 
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    except ImportError:
+        pass
+
+    # This is the fix: use create_task on an already-running loop
+    import nest_asyncio
+    nest_asyncio.apply()
+
+    asyncio.get_event_loop().create_task(main())
 
     try:
-        loop.run_until_complete(main())
-    except Exception as e:
-        logger.error(f"Exception in run_polling: {e}")
+        asyncio.get_event_loop().run_forever()
+    except KeyboardInterrupt:
+        print("Bot stopped manually.")
 
 
 
