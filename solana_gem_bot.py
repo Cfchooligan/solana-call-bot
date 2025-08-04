@@ -1,7 +1,8 @@
-import asyncio
 import logging
+import asyncio
 import httpx
 import random
+import nest_asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -73,7 +74,6 @@ async def run_bot():
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Schedule auto posts
     scheduler = AsyncIOScheduler()
     scheduler.add_job(lambda: asyncio.create_task(post_gems(application)), "cron", hour="10,14,20")
     scheduler.start()
@@ -83,8 +83,9 @@ async def run_bot():
     logger.info("✅ Bot is starting polling...")
     await application.run_polling()
 
-# === LAUNCH BOT ===
+# === START WITH NEST_ASYNCIO ===
 if __name__ == "__main__":
-    asyncio.run(run_bot())
+    nest_asyncio.apply()
+    asyncio.get_event_loop().run_until_complete(run_bot())
 
 
