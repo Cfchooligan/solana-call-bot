@@ -63,7 +63,7 @@ async def send_solana_gem(context=None):
     else:
         logger.info("No Solana gem found.")
 
-async def main():
+async def run_bot():
     logger.info("🚀 Bot script is executing...")
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -75,12 +75,12 @@ async def main():
     logger.info("✅ Bot is starting polling...")
     await app.initialize()
     await app.start()
-    await app.run_polling()  # ✅ Replaces updater.start_polling and idle()
+    await app.updater.start_polling()  # For backward compatibility
+    # Note: Do not call app.run_polling() or app.idle()
 
+# Instead of asyncio.run(main()), use this
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logger.error(f"❌ Exception in run_polling: {e}")
-
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_bot())
+    loop.run_forever()
 
