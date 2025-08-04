@@ -30,7 +30,7 @@ async def get_gems():
         logger.error(f"Failed to fetch Birdeye data: {e}")
         return []
 
-# === FORMAT MESSAGE FOR EACH GEM ===
+# === FORMAT MESSAGE ===
 def format_gem(gem):
     name = gem.get("name")
     symbol = gem.get("symbol")
@@ -52,7 +52,7 @@ def format_gem(gem):
         f"🧾 `{address}`"
     )
 
-# === POST GEMS TO TELEGRAM CHANNEL ===
+# === POST TO TELEGRAM ===
 async def post_gems(application):
     gems = await get_gems()
     if not gems:
@@ -67,8 +67,8 @@ async def forcepost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📢 Posting gems now...")
     await post_gems(context.application)
 
-# === MAIN FUNCTION ===
-async def main():
+# === MAIN BOT SETUP ===
+async def run_bot():
     logger.info("🚀 Bot script is executing...")
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -78,15 +78,21 @@ async def main():
     scheduler.add_job(lambda: asyncio.create_task(post_gems(application)), "cron", hour="10,14,20")
     scheduler.start()
 
-    # Add command handlers
     application.add_handler(CommandHandler("forcepost", forcepost))
 
     logger.info("✅ Bot is starting polling...")
     await application.initialize()
     await application.start()
     await application.bot.delete_webhook(drop_pending_updates=True)
-    await application.run_polling()
+    await application.updater.start_polling()
+    await application.updater.idle()
 
-# === ENTRY POINT ===
+# === FIX FOR ALREADY RUNNING LOOP ===
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        loop = asyncio.get_event_loop()
+        loop.create_task(run_bot())
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+
