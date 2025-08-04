@@ -81,20 +81,10 @@ async def run_bot():
     application.add_handler(CommandHandler("forcepost", forcepost))
 
     logger.info("✅ Bot is starting polling...")
-    await application.initialize()
-    await application.start()
-    await application.bot.delete_webhook(drop_pending_updates=True)
     await application.run_polling()
 
-# === LAUNCH FOR RAILWAY ===
+# === LAUNCH BOT ===
 if __name__ == "__main__":
-    import nest_asyncio
-    nest_asyncio.apply()
-
-    try:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(run_bot())
-    except RuntimeError as e:
-        logger.error(f"Runtime error: {e}")
+    asyncio.run(run_bot())
 
 
