@@ -1,2 +1,4 @@
-python-telegram-bot[job-queue]
-requests
+python-telegram-bot==20.7
+httpx
+apscheduler
+nest_asyncio
