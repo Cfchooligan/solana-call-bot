@@ -88,8 +88,13 @@ async def run_bot():
 
 # === LAUNCH FOR RAILWAY ===
 if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
+
     try:
-        asyncio.run(run_bot())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(run_bot())
     except RuntimeError as e:
         logger.error(f"Runtime error: {e}")
+
 
