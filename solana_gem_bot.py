@@ -1,104 +1,114 @@
 import logging
 import asyncio
-import random
 import httpx
 from telegram import Update
-from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime
 
-# Telegram bot token and chat/channel/user ID
-TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
-CHAT_ID = "-1002115985162"  # Your Telegram channel ID
-OWNER_ID = 6954984074       # Your Telegram user ID
+# === Configuration ===
+TELEGRAM_BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
+CHANNEL_ID = "@zero2heromfers"  # Use '@channel_username' or chat ID (e.g., -100...)
+OWNER_ID = 6954984074  # Your Telegram user ID
 
-# DexScreener API for Solana
-DEX_API_URL = "https://api.dexscreener.com/latest/dex/pairs/solana"
-
-# Set up logging
+# === Logging Setup ===
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Format token post
-def format_gem(gem):
-    name = gem.get("baseToken", {}).get("name", "Unknown")
-    symbol = gem.get("baseToken", {}).get("symbol", "N/A")
-    price = float(gem.get("priceUsd", 0))
-    liquidity = float(gem.get("liquidity", {}).get("usd", 0))
-    volume = float(gem.get("volume", {}).get("h5", 0))
-    buyers = gem.get("txns", {}).get("h5", {}).get("buys", 0)
-    sellers = gem.get("txns", {}).get("h5", {}).get("sells", 0)
-    address = gem.get("pairAddress", "")
-    chart_url = gem.get("url", f"https://dexscreener.com/solana/{address}")
-
-    return (
-        f"💎 *{name}* ({symbol})\n"
-        f"💰 Price: ${price:.4f}\n"
-        f"💧 Liquidity: ${liquidity:,.0f}\n"
-        f"📈 5m Volume: ${volume:,.0f}\n"
-        f"🟢 Buyers: {buyers} | 🔴 Sellers: {sellers}\n"
-        f"🔗 [Dexscreener Chart]({chart_url})\n"
-        f"🧾 `{address}`"
-    )
-
-# Fetch gems from DexScreener
-async def get_gems():
+# === Fetch Tokens from Birdeye ===
+async def fetch_new_tokens():
+    url = "https://public-api.birdeye.so/public/token/solana/new?limit=50"
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(DEX_API_URL)
-            data = response.json().get("pairs", [])
-            if not data:
-                logger.info("No gems found.")
+            response = await client.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("data", [])
+            else:
+                logger.warning(f"Birdeye API error: {response.status_code}")
                 return []
-            gems = random.sample(data, min(3, len(data)))
-            return gems
     except Exception as e:
-        logger.error(f"Failed to fetch gems: {e}")
+        logger.error(f"Error fetching tokens: {e}")
         return []
 
-# Post gems to Telegram
-async def post_gems(application):
-    gems = await get_gems()
-    if not gems:
-        logger.info("No gems to post.")
+# === Format Token Info for Telegram Post ===
+def format_token(token):
+    name = token.get("name", "Unknown")
+    symbol = token.get("symbol", "N/A")
+    price = token.get("priceUsd", 0)
+    liquidity = token.get("liquidity", 0)
+    volume = token.get("volumeH5", 0)
+    buyers = token.get("buyersH5", 0)
+    sellers = token.get("sellersH5", 0)
+    address = token.get("address", "")
+    link = f"https://birdeye.so/token/{address}?chain=solana"
+
+    return (
+        f"💎 <b>{name} (${symbol})</b>\n"
+        f"💰 Price: ${price:.6f}\n"
+        f"📊 Liquidity: ${liquidity:,.0f}\n"
+        f"📈 5m Volume: ${volume:,.0f}\n"
+        f"🟢 Buyers: {buyers} | 🔴 Sellers: {sellers}\n"
+        f"🔗 <a href='{link}'>View on Birdeye</a>\n"
+        f"🧾 <code>{address}</code>"
+    )
+
+# === Post Gems to Telegram ===
+async def post_gems(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("🔍 Checking for gems...")
+    tokens = await fetch_new_tokens()
+    if not tokens:
+        logger.info("No gems found.")
+        await context.bot.send_message(chat_id=CHANNEL_ID, text="🕵️ No gems found this round.")
         return
 
-    for gem in gems:
-        message = format_gem(gem)
-        await application.bot.send_message(
-            chat_id=CHAT_ID,
-            text=message,
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
+    gems_posted = 0
+    for token in tokens:
+        try:
+            message = format_token(token)
+            await context.bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=message,
+                parse_mode="HTML",
+                disable_web_page_preview=False
+            )
+            gems_posted += 1
+            if gems_posted >= 3:
+                break
+        except Exception as e:
+            logger.error(f"Error sending token: {e}")
+    logger.info(f"✅ Posted {gems_posted} gems.")
 
-# /forcepost command
-async def force_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_chat.id) == str(CHAT_ID) or update.effective_user.id == OWNER_ID:
-        await post_gems(context.application)
-        await update.message.reply_text("✅ Gems posted.")
-    else:
-        await update.message.reply_text("⛔ You are not allowed to use this command.")
+# === /forcepost Command Handler ===
+async def forcepost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("⛔ You're not authorized to use this command.")
+        return
+    await update.message.reply_text("📬 Forcing gem post now...")
+    await post_gems(context)
 
-# Start everything
+# === Bot Runner ===
 async def run_bot():
-    application = ApplicationBuilder().token(TOKEN).build()
+    logger.info("🚀 Bot script is executing...")
 
-    application.add_handler(CommandHandler("forcepost", force_post))
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
+    # Register commands
+    app.add_handler(CommandHandler("forcepost", forcepost))
+
+    # Scheduler setup
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: asyncio.create_task(post_gems(application)), "cron", hour="9,15,21")
+    scheduler.add_job(lambda: asyncio.create_task(post_gems(app.bot)), 'interval', hours=8)
     scheduler.start()
 
     logger.info("✅ Bot is starting polling...")
-    await application.run_polling()
+    await app.run_polling()
 
+# === Entry Point ===
 if __name__ == "__main__":
-    logger.info("🚀 Bot script is executing...")
-    loop = asyncio.get_event_loop()
-    loop.create_task(run_bot())
-    loop.run_forever()
-
-
+    try:
+        asyncio.run(run_bot())
+    except RuntimeError as e:
+        logger.error(f"Runtime error: {e}")
 
 
