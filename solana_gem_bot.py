@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # === Your Bot Credentials ===
 BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
-CHANNEL_ID = "-1002120479960"  # Replace with your channel ID
+CHANNEL_ID = "-1002120479960"  # Your Telegram channel ID
 OWNER_ID = 6954984074          # Your Telegram user ID
 
 # === Logging Setup ===
@@ -22,7 +22,7 @@ scheduler = AsyncIOScheduler()
 # === Fetch Solana Meme Coins from Birdeye ===
 async def fetch_gems():
     url = "https://public-api.birdeye.so/public/token/solana/new?limit=50"
-    headers = {"X-API-KEY": "public"}  # Public key may not work if Birdeye enforces API key
+    headers = {"X-API-KEY": "public"}
 
     try:
         async with httpx.AsyncClient() as client:
@@ -77,7 +77,7 @@ async def post_gems(context=None):
 
     app = context.application if context else None
 
-    for gem in gems[:3]:  # Limit to top 3 gems
+    for gem in gems[:3]:  # Post top 3 gems only
         await app.bot.send_message(
             chat_id=CHANNEL_ID,
             text=gem,
@@ -115,13 +115,12 @@ async def run_bot():
     logger.info("✅ Bot is starting polling...")
     await app.run_polling()
 
-# === Entry Point ===
+# === Entry Point (Fixed Event Loop) ===
 if __name__ == "__main__":
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         loop.run_until_complete(run_bot())
-    except RuntimeError as e:
-        logger.error(f"Runtime error: {e}")
-
-
+    except Exception as e:
+        logger.error(f"❌ Runtime error: {e}")
 
