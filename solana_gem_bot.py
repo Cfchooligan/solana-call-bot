@@ -84,15 +84,12 @@ async def run_bot():
     await application.initialize()
     await application.start()
     await application.bot.delete_webhook(drop_pending_updates=True)
-    await application.updater.start_polling()
-    await application.updater.idle()
+    await application.run_polling()
 
-# === FIX FOR ALREADY RUNNING LOOP ===
+# === LAUNCH FOR RAILWAY ===
 if __name__ == "__main__":
     try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(run_bot())
-        loop.run_forever()
-    except KeyboardInterrupt:
-        pass
+        asyncio.run(run_bot())
+    except RuntimeError as e:
+        logger.error(f"Runtime error: {e}")
 
