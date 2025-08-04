@@ -54,7 +54,7 @@ def fetch_solana_gem():
         logger.error(f"Failed to fetch or parse data: {e}")
         return None
 
-async def send_solana_gem(context=None):
+async def send_solana_gem():
     gem_info = fetch_solana_gem()
     if gem_info:
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -69,18 +69,31 @@ async def run_bot():
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: asyncio.create_task(send_solana_gem()), "cron", hour="10,15,20")
+    scheduler.add_job(lambda: asyncio.create_task(send_solana_gem()), "cron", hour="10,15,20")  # UTC time
     scheduler.start()
 
     logger.info("✅ Bot is starting polling...")
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()  # For backward compatibility
-    # Note: Do not call app.run_polling() or app.idle()
+    await app.updater.start_polling()
+    await app.updater.idle()
 
-# Instead of asyncio.run(main()), use this
+# 🧪 Force an immediate call on start
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(run_bot())
-    loop.run_forever()
+    try:
+        import sys
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        loop.create_task(send_solana_gem())   # Immediate forced post
+        loop.create_task(run_bot())           # Normal polling + scheduler
+        loop.run_forever()
+
+    except Exception as e:
+        logger.error(f"❌ Exception in run_polling: {e}")
+
+
 
