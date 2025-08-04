@@ -14,19 +14,20 @@ logger = logging.getLogger(__name__)
 
 # Telegram Bot Setup
 TELEGRAM_BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
-TELEGRAM_CHANNEL_ID = "-1002866839481"
+TELEGRAM_CHANNEL_ID = "-1002117872733"  # @zero2heromfers
 
 def fetch_solana_gem():
-    url = "https://api.dexscreener.com/latest/dex/pairs/solana"
+    url = "https://api.dexscreener.com/latest/dex/pairs"
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
 
-        if not data["pairs"]:
+        solana_pairs = [p for p in data.get("pairs", []) if p.get("chainId") == "solana"]
+        if not solana_pairs:
             return None
 
-        top_pair = data["pairs"][0]
+        top_pair = solana_pairs[0]
         name = top_pair.get("baseToken", {}).get("name", "Unknown")
         symbol = top_pair.get("baseToken", {}).get("symbol", "N/A")
         price = top_pair.get("priceUsd", "N/A")
@@ -69,16 +70,15 @@ async def run_bot():
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: asyncio.create_task(send_solana_gem()), "cron", hour="10,15,20")  # UTC time
+    scheduler.add_job(lambda: asyncio.create_task(send_solana_gem()), "cron", hour="10,15,20")  # 3x daily UTC
     scheduler.start()
 
     logger.info("✅ Bot is starting polling...")
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-    await app.updater.idle()
 
-# 🧪 Force an immediate call on start
+# 🔥 Force an immediate post on startup
 if __name__ == "__main__":
     try:
         import sys
@@ -88,8 +88,8 @@ if __name__ == "__main__":
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        loop.create_task(send_solana_gem())   # Immediate forced post
-        loop.create_task(run_bot())           # Normal polling + scheduler
+        loop.create_task(send_solana_gem())   # Force post now
+        loop.create_task(run_bot())           # Start polling & scheduler
         loop.run_forever()
 
     except Exception as e:
