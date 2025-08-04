@@ -1,128 +1,87 @@
 import asyncio
 import logging
-from datetime import datetime
 import httpx
-from telegram import Bot
-from telegram.ext import Application, ApplicationBuilder
+import random
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# ====== SETUP ======
-TELEGRAM_BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
-TELEGRAM_CHANNEL_ID = "@zero2heromfers"
+# === YOUR BOT SETTINGS ===
+BOT_TOKEN = "7743771588:AAEOv4qFXOkvUBpIXYfrzqh6Y6CVoOxh-lQ"
+CHANNEL_ID = "@zero2heromfers"
+BIRDEYE_URL = "https://public-api.birdeye.so/public/token/solana/new?limit=50"
 
-DEXSCREENER_API_URL = "https://api.dexscreener.com/latest/dex/pairs/solana"
-
-# ====== LOGGER ======
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ====== GET DATA ======
-async def fetch_solana_gem():
+# === GET GEMS ===
+async def get_gems():
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(DEXSCREENER_API_URL)
-            response.raise_for_status()
-            data = response.json()
-
-        if not data.get("pairs"):
-            logger.info("No Solana pairs found.")
-            return None
-
-        # Filter top coin by volume with some conditions (e.g. low mcap, low liquidity)
-        filtered = [
-            pair for pair in data["pairs"]
-            if pair.get("baseToken", {}).get("name")
-            and pair.get("liquidity", {}).get("usd", 0) > 1000
-            and pair.get("liquidity", {}).get("usd", 0) < 30000
-            and pair.get("volume", {}).get("h5", 0) > 2000
-        ]
-
-        if not filtered:
-            logger.info("No Solana gem found.")
-            return None
-
-        gem = sorted(filtered, key=lambda x: x["volume"]["h5"], reverse=True)[0]
-        return gem
-
+            response = await client.get(BIRDEYE_URL)
+            data = response.json().get("data", [])
+            if not data:
+                logger.info("No gems found.")
+                return []
+            gems = random.sample(data, min(3, len(data)))
+            return gems
     except Exception as e:
-        logger.error(f"Failed to fetch or parse data: {e}")
-        return None
+        logger.error(f"Failed to fetch Birdeye data: {e}")
+        return []
 
-# ====== FORMAT MESSAGE ======
-def format_gem_message(pair):
-    try:
-        name = pair["baseToken"]["name"]
-        symbol = pair["baseToken"]["symbol"]
-        price = pair["priceUsd"]
-        liquidity = pair["liquidity"]["usd"]
-        volume = pair["volume"]["h5"]
-        txns = pair["txns"]["h5"]
-        buyers = txns["buys"]
-        sellers = txns["sells"]
-        dex_url = pair["url"]
-        contract = pair["pairAddress"]
+# === FORMAT GEM MESSAGE ===
+def format_gem(gem):
+    name = gem.get("name")
+    symbol = gem.get("symbol")
+    price = gem.get("priceUsd")
+    liquidity = gem.get("liquidity", {}).get("usd", 0)
+    volume = gem.get("volume", {}).get("h5", 0)
+    buys = gem.get("txns", {}).get("h5", {}).get("buys", 0)
+    sells = gem.get("txns", {}).get("h5", {}).get("sells", 0)
+    address = gem.get("address")
+    birdeye_link = f"https://birdeye.so/token/{address}?chain=solana"
 
-        message = (
-            f"🚀 *SOLANA GEM ALERT*\n\n"
-            f"*Name:* {name}\n"
-            f"*Symbol:* {symbol}\n"
-            f"*Price:* ${price}\n"
-            f"*Liquidity:* ${liquidity}\n"
-            f"*5m Volume:* ${volume}\n"
-            f"*Buyers/Sellers (5m):* {buyers}/{sellers}\n"
-            f"*DexScreener:* [Link]({dex_url})\n"
-            f"*Contract:* `{contract}`\n\n"
-            f"#Solana #MemeCoin #Gem"
-        )
-        return message
-    except Exception as e:
-        logger.error(f"Failed to format message: {e}")
-        return None
+    return (
+        f"💎 *{name}* ({symbol})\n"
+        f"💰 Price: ${price:.4f}\n"
+        f"💧 Liquidity: ${liquidity:,.0f}\n"
+        f"📈 5m Volume: ${volume:,.0f}\n"
+        f"🟢 Buyers: {buys} | 🔴 Sellers: {sells}\n"
+        f"🔗 [Birdeye Chart]({birdeye_link})\n"
+        f"🧾 `{address}`"
+    )
 
-# ====== SEND TO TELEGRAM ======
-async def send_to_telegram(bot: Bot):
-    gem = await fetch_solana_gem()
-    if not gem:
+# === POST TO TELEGRAM ===
+async def post_gems(application):
+    gems = await get_gems()
+    if not gems:
+        logger.info("No gems to post.")
         return
+    for gem in gems:
+        msg = format_gem(gem)
+        await application.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
 
-    message = format_gem_message(gem)
-    if not message:
-        return
+# === /FORCEPOST COMMAND ===
+async def forcepost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Posting gems now...")
+    await post_gems(context.application)
 
-    try:
-        await bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=message, parse_mode="Markdown")
-        logger.info("✅ Sent Solana gem to Telegram channel.")
-    except Exception as e:
-        logger.error(f"❌ Failed to send message to Telegram: {e}")
-
-# ====== MAIN BOT FUNCTION ======
+# === SCHEDULED RUN ===
 async def run_bot():
     logger.info("🚀 Bot script is executing...")
 
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
-    await bot.delete_webhook(drop_pending_updates=True)
-    logger.info("✅ Bot is starting polling...")
-
-    # ⚡️ FORCE CALL HERE
-    await send_to_telegram(bot)
-
-    # Scheduled job
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(lambda: asyncio.create_task(send_to_telegram(bot)), "cron", hour="9,13,18")  # Nigeria time
+    scheduler.add_job(lambda: asyncio.create_task(post_gems(application)), "cron", hour="10,14,20")
     scheduler.start()
 
-    # Keep alive
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-    await application.updater.wait_until_closed()
+    application.add_handler(CommandHandler("forcepost", forcepost))
+    logger.info("✅ Bot is starting polling...")
+    await application.run_polling()
 
-# ====== ENTRY POINT ======
+# === ENTRY POINT ===
 if __name__ == "__main__":
     asyncio.run(run_bot())
-
 
 
 
