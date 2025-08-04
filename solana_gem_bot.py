@@ -95,7 +95,10 @@ async def run_bot():
 
 if __name__ == "__main__":
     logger.info("🚀 Bot script is executing...")
-    asyncio.run(run_bot())
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_bot())
+    loop.run_forever()
+
 
 
 
